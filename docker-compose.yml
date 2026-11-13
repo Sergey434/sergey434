@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aggregator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aggregator}
+      POSTGRES_DB: aggregator
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aggregator"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  core:
+    build: ./core
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aggregator:${POSTGRES_PASSWORD:-aggregator}@postgres:5432/aggregator
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "127.0.0.1:8000:8000"  # наружу — только через reverse proxy (nginx/caddy) с HTTPS
+
+  bot:
+    build: ./bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CORE_URL: http://core:8000
+    depends_on:
+      - core
+
+volumes:
+  pgdata:
